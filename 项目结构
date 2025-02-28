@@ -1,0 +1,5 @@
+huangli_scraper/
+├── scraper.py       # 主抓取逻辑
+├── storage.py       # 数据存储加载类
+├── main.py          # 执行入口
+└── requirements.txt # 依赖文件 
