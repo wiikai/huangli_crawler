@@ -75,7 +75,7 @@ def get_huangli_data(url, session):
         response = session.get(url, timeout=8)
         response.encoding = 'utf-8'
         soup = BeautifulSoup(response.text, 'html.parser')
-        data = {"cs": "", "constellation": "", "weeks": "", "zs": "", "jianxing": "", "taishen": "", "num_weeks":"", "day": "", "wuxing_day": "","jieqi": "","next_jieqi": "","festival": "","next_festival": "",}
+        data = {"cs": "", "constellation": "", "weeks": "",  "taishen": "", "num_weeks":"",  "wuxing_day": "","jieqi": "","next_jieqi": "","festival": "","next_festival": "",}
         shengxiao = ""
         
         for div in soup.find_all('div', class_='hang_left'):
@@ -88,16 +88,16 @@ def get_huangli_data(url, session):
                 elif key == '冲煞':
                     if match := re.search(r'冲(.+?)煞(.+)', value): data["cs"] = f"{shengxiao}日冲{match.group(1)} 煞{match.group(2)}"
                 elif key == '星座': data["constellation"] = value
-                elif key == '十二建星': data["jianxing"] = value
-                elif key == '值神': data["zs"] = value
+                # elif key == '十二建星': data["jianxing"] = value
+                # elif key == '值神': data["zs"] = value
                 elif key == '第几周': data["num_weeks"] = value
                 elif key == '胎神': data["taishen"] = value.replace('、', ' ')
                 elif key == '纳音': data["wuxing_day"] = value
 
         week_div = soup.find('div', class_='zhong_week')
         data["weeks"] = week_div.get_text(strip=True) if week_div else ""
-        qijie_div = soup.find('div', class_='qijie')
-        if qijie_div: data["day"] = qijie_div.find('a').text.strip() if qijie_div.find('a') else ""
+        # qijie_div = soup.find('div', class_='qijie')
+        # if qijie_div: data["day"] = qijie_div.find('a').text.strip() if qijie_div.find('a') else ""
         
         
         sucha_div = soup.find('div', class_='sucha')
@@ -264,6 +264,70 @@ def get_color_info(date_str, session):
 
     return result
 
+def get_erba(date_str, session):
+    url = f"https://www.qmrl888.com/{date_str}.html"
+
+    try:
+        response = session.get(url, timeout=10)
+        response.encoding = 'utf-8'
+        soup = BeautifulSoup(response.text, 'html.parser')
+        
+        result = {
+            "zs": None,        # 玉堂值神
+            "jianxing": None,  # 建星（破日）
+            "day": None,        # 黄道日判断
+            "erba":None
+        }
+        
+        host_info = None
+        for item in soup.find_all('div', class_='infoitem'):
+            h3_tag = item.find('h3')
+            if h3_tag and '二十八宿' in h3_tag.text:
+                host_info = item
+                break
+
+        if host_info:
+            title_div = host_info.find('div', class_='title')
+            spans = title_div.find_all('span')
+            
+            if len(spans) == 3:
+                result['erba'] = f"{spans[0].text}{spans[1].text}{spans[2].text}"
+            else:
+                print("二十八宿结构异常")
+
+        else:
+            print("未找到二十八宿信息")
+
+        # 定位到所有infoitem区块
+        items = soup.find_all('div', class_='infoitem')
+        
+        # 提取数据
+        for item in items:
+            h3 = item.find('h3')
+            if not h3: continue
+            
+            # 判断是黄历吉日区块
+            if '黄历是吉日吗' in h3.text.strip():
+                spans = item.select('div.content span')
+                if len(spans) >= 2:
+                    result['zs'] = spans[0].text.strip()  # 玉堂
+                    day_text = spans[1].text.strip()
+                    if day_text == '黄道日':
+                        result['day'] = '黄道吉日'
+                    else:
+                        result['day'] = day_text
+            
+            # 判断是建日区块
+            elif '是什么建日' in h3.text.strip():
+                span = item.select_one('div.title span')
+                if span:
+                    result['jianxing'] = span.text.strip()  # 破日
+
+    except Exception as e:
+        print(f"出错：{str(e)}")
+
+    return result
+
 def get_lucky_time(date_str, session):
     url = f'https://m.tthuangli.com/jinrihuangli/jishi_{date_str}.html'
     
@@ -323,7 +387,8 @@ def scrape_single_date(date_str, session):
                 "sx": executor.submit(get_shengxiao_info, date_obj, session),
                 "color": executor.submit(get_color_info, date_str, session),
                 "yiji": executor.submit(get_yiji_info, date_str, session),
-                "lucky_time": executor.submit(get_lucky_time, date_str, session)
+                "lucky_time": executor.submit(get_lucky_time, date_str, session),
+                "erba": executor.submit(get_erba, date_str, session)
             }
 
             # 合并副站数据（自动展开嵌套字段）
@@ -336,11 +401,11 @@ def scrape_single_date(date_str, session):
                             "cs": result.get("cs", ""),
                             "constellation": result.get("constellation", ""),
                             "weeks": result.get("weeks", ""),
-                            "zs": result.get("zs", ""),
-                            "jianxing": result.get("jianxing", ""),
+                            # "zs": result.get("zs", ""),
+                            # "jianxing": result.get("jianxing", ""),
                             "taishen": result.get("taishen", ""),
                             "num_weeks": result.get("num_weeks", ""),
-                            "day": result.get("day", ""),
+                            # "day": result.get("day", ""),
                             "wuxing_day": result.get("wuxing_day", ""),
                             "jieqi": result.get("jieqi", ""),
                             "next_jieqi": result.get("next_jieqi", ""),
@@ -362,6 +427,13 @@ def scrape_single_date(date_str, session):
                     elif key == "lucky_time":
                         base_data.update({
                             "lucky_time": result.get("lucky_time", ""),
+                        })
+                    elif key == "erba":
+                        base_data.update({
+                            "erba": result.get("erba", ""),
+                            "zs": result.get("zs", ""),
+                            "jianxing": result.get("jianxing", ""),
+                            "day": result.get("day", ""),
                         })
                 except Exception as e:
                     logging.warning(f"副站 {key} 数据获取失败: {str(e)}")
