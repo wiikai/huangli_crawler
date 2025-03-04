@@ -58,15 +58,46 @@ def extract_suitable_items(soup):
 
 def extract_lunar_info(soup):
     """提取农历/干支/生肖/彭祖百忌"""
-    lunar_data = {"lunar": "", "ganzhi": "", "pzbj": ""}
+    lunar_data = {
+        "lunar": "",
+        "ganzhi_nian": "",
+        "ganzhi_yue": "",
+        "ganzhi_ri": "",
+        "pzbj": "",
+        "year": ""
+    }
+
+    # 提取农历日期
     lunar_div = soup.find('div', class_='lunar')
-    if lunar_div: lunar_data["lunar"] = lunar_div.text.replace("农历", "").strip()
+    if lunar_div:
+        lunar_data["lunar"] = lunar_div.text.replace("农历", "").strip()
+
+    # 提取干支信息
     body_div = soup.find('div', class_='body')
     if body_div:
+        # 处理主要干支段落
         ganzhi_p = body_div.find('p')
-        if ganzhi_p: lunar_data["ganzhi"] = ganzhi_p.text.split('生肖属')[0].strip()     
+        if ganzhi_p:
+            # 处理干支和生肖
+            text_parts = ganzhi_p.text.split('生肖属')
+            if len(text_parts) > 0:
+                # 干支拆分
+                ganzhi_str = text_parts[0].strip()
+                ganzhi_parts = ganzhi_str.split()
+                if len(ganzhi_parts) == 3:
+                    lunar_data["ganzhi_nian"] = ganzhi_parts[0]
+                    lunar_data["ganzhi_yue"] = ganzhi_parts[1]
+                    lunar_data["ganzhi_ri"] = ganzhi_parts[2]
+                
+                # 生肖处理
+                if len(text_parts) > 1:
+                    zodiac = text_parts[1].strip()
+                    lunar_data["year"] = f"{zodiac}年"
+
+        # 提取彭祖百忌
         pzbj_p = ganzhi_p.find_next_sibling('p') if ganzhi_p else None
-        if pzbj_p and "彭祖百忌:" in pzbj_p.text: lunar_data["pzbj"] = pzbj_p.text.replace("彭祖百忌:", "").strip()
+        if pzbj_p and "彭祖百忌:" in pzbj_p.text:
+            lunar_data["pzbj"] = pzbj_p.text.replace("彭祖百忌:", "").strip()
     return lunar_data
 
 def get_huangli_data(url, session):
@@ -75,7 +106,7 @@ def get_huangli_data(url, session):
         response = session.get(url, timeout=8)
         response.encoding = 'utf-8'
         soup = BeautifulSoup(response.text, 'html.parser')
-        data = {"cs": "", "constellation": "", "weeks": "",  "taishen": "", "num_weeks":"",  "wuxing_day": "","jieqi": "","next_jieqi": "","festival": "","next_festival": "",}
+        data = {"cs": "", "constellation": "", "weeks": "", "num_weeks":"",  "wuxing_nayin": "",  "wuxing_tiangan": "","jieqi": "","next_jieqi": "","festival": "","next_festival": "",}
         shengxiao = ""
         
         for div in soup.find_all('div', class_='hang_left'):
@@ -91,8 +122,9 @@ def get_huangli_data(url, session):
                 # elif key == '十二建星': data["jianxing"] = value
                 # elif key == '值神': data["zs"] = value
                 elif key == '第几周': data["num_weeks"] = value
-                elif key == '胎神': data["taishen"] = value.replace('、', ' ')
-                elif key == '纳音': data["wuxing_day"] = value
+                # elif key == '胎神': data["taishen"] = value.replace('、', ' ')
+                elif key == '纳音': data["wuxing_nayin"] = value
+                elif key == '五行': data["wuxing_tiangan"] = value
 
         week_div = soup.find('div', class_='zhong_week')
         data["weeks"] = week_div.get_text(strip=True) if week_div else ""
@@ -360,6 +392,41 @@ def get_lucky_time(date_str, session):
     except Exception as e:
         return json.dumps({"error": str(e)}, ensure_ascii=False)
 
+
+def parse_jixiong_items(date_str, session):
+    url = f'https://www.buyiju.com/lhl/{date_str}.html'
+
+    response = session.get(url, timeout=10)
+    response.encoding = 'utf-8'
+    soup = BeautifulSoup(response.text, 'html.parser')
+
+    result = {
+        "jsyq": "",
+        "xsyq": "",
+        "taishen": ""
+    }
+
+    # 提取胎神信息
+    solar_div = soup.find('div', class_='solar')
+    if solar_div:
+        taishen_text = solar_div.text.strip()
+    if '胎神：' in taishen_text:
+        result["taishen"] = taishen_text.split('胎神：')[-1].strip()
+
+    # 获取吉神宜趋
+    jsyq_header = soup.find('h4', string='吉神宜趋')
+    if jsyq_header:
+        jsyq_items = jsyq_header.find_next_sibling('div', class_='jishen').find_all('li')
+        result["jsyq"] = ' '.join([item.text.strip() for item in jsyq_items])
+
+    # 获取凶煞宜忌
+    xsyq_header = soup.find('h4', string='凶煞宜忌')
+    if xsyq_header:
+        xsyq_items = xsyq_header.find_next_sibling('div', class_='jishen').find_all('li')
+        result["xsyq"] = ' '.join([item.text.strip() for item in xsyq_items])
+
+    return result
+
 # ====================== 主抓取逻辑 ======================
 def scrape_single_date(date_str, session):
     """单个日期的完整抓取流程"""
@@ -376,7 +443,7 @@ def scrape_single_date(date_str, session):
             **extract_lunar_info(soup),
             **extract_suitable_items(soup),
             **parse_god_positions(soup),  # 单独解析财神位
-            **parse_jixiong_items(soup)    # 解析吉神宜趋和凶煞宜忌
+            **parse_jixiong_items(date_str, session),
         }
 
         # ===== 并发获取副站数据 =====
@@ -403,10 +470,11 @@ def scrape_single_date(date_str, session):
                             "weeks": result.get("weeks", ""),
                             # "zs": result.get("zs", ""),
                             # "jianxing": result.get("jianxing", ""),
-                            "taishen": result.get("taishen", ""),
+                            # "taishen": result.get("taishen", ""),
                             "num_weeks": result.get("num_weeks", ""),
                             # "day": result.get("day", ""),
-                            "wuxing_day": result.get("wuxing_day", ""),
+                            "wuxing_nayin": result.get("wuxing_nayin", ""),
+                            "wuxing_tiangan": result.get("wuxing_tiangan", ""),
                             "jieqi": result.get("jieqi", ""),
                             "next_jieqi": result.get("next_jieqi", ""),
                             "festival": result.get("festival", ""),
@@ -454,7 +522,11 @@ def find_item_by_title(title,soup):
 # ========= 新增的解析函数 =========
 def parse_god_positions(soup):
     """解析财神位信息"""
-    god_data = {"godposition": ""}
+    god_data = {
+        "godposition_caishen": "",
+        "godposition_xishen": "",
+        "godposition_fushen": ""
+        }
 
     try:
         caishen_div = find_item_by_title('财神位',soup)
@@ -466,23 +538,10 @@ def parse_god_positions(soup):
             key, val = li.text.strip().split('：', 1)
             caishen_data[key] = val
         
-        god_data["godposition"] = f"喜神在{caishen_data['喜神']} 财神在{caishen_data['财神']} 福神在{caishen_data['福神']}"
+        god_data["godposition_caishen"] = f"{caishen_data['财神']}"
+        god_data["godposition_xishen"] = f"{caishen_data['喜神']}"
+        god_data["godposition_fushen"] = f"{caishen_data['福神']}"
 
     except Exception as e:
         logging.warning(f"财神位解析失败: {str(e)}")
     return god_data
-
-def parse_jixiong_items(soup):
-    """解析吉神宜趋和凶煞宜忌"""
-    jixiong_data = {"jsyq": "", "xsyq": ""}
-    try:
-        # 吉神宜趋 - 添加class匹配
-        jsyq_div = soup.find('h4', string='吉神宜趋').find_next('ul', class_='list-2')
-        jixiong_data["jsyq"] = ' '.join([li.text.strip() for li in jsyq_div.find_all('li')]) if jsyq_div else ""
-        
-        # 凶煞宜忌 - 添加class匹配
-        xsyq_div = soup.find('h4', string='凶煞宜忌').find_next('ul', class_='list-2')
-        jixiong_data["xsyq"] = ' '.join([li.text.strip() for li in xsyq_div.find_all('li')]) if xsyq_div else ""
-    except Exception as e:
-        logging.warning(f"吉凶信息解析失败: {str(e)}")
-    return jixiong_data 
